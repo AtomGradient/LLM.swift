@@ -1,3 +1,58 @@
+# Quote
+We added `getEmbeddings` to LLM package:
+
+```swift
+public func getEmbeddings(for text: String) -> [Float]? {
+    let tokens = encode(text)
+    var batch = llama_batch_init(Int32(tokens.count), 0, 1)
+    
+    for (i, token) in tokens.enumerated() {
+        batch.add(token, Int32(i), [0], i == tokens.count - 1)
+    }
+    
+    var params = llama_context_default_params()
+    params.embeddings = true
+    params.pooling_type = LLAMA_POOLING_TYPE_NONE
+    
+    let context = Context(model, params)
+    
+    context.decode(batch)
+    llama_synchronize(context.pointer)
+    
+    guard let embeddingsPointer = llama_get_embeddings(context.pointer) else {
+        llama_batch_free(batch)
+        return nil
+    }
+    
+    let embeddingSize = llama_n_embd(model)
+    let embeddings = Array(UnsafeBufferPointer(start: embeddingsPointer, count: Int(embeddingSize)))
+    
+    llama_batch_free(batch)
+    return embeddings
+}
+```
+
+you can use this func to invoke it:
+```swift
+func getEmbeddings(for input: String, completion: @escaping ([Float]?, TimeInterval) -> Void) {
+    let start = DispatchTime.now()
+    guard let embeddings = bot.getEmbeddings(for: input) else {
+        completion(nil, 0)
+        return
+    }
+    let end = DispatchTime.now()
+    let nanoTime = end.uptimeNanoseconds - start.uptimeNanoseconds
+    let timeInterval = Double(nanoTime) / 1_000_000_000
+    
+    completion(embeddings, timeInterval)
+}
+```
+
+SPM support:
+
+    https://github.com/AtomGradient/LLM.swift
+
+
 # LLM.swift
 
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Feastriverlee%2FLLM.swift%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/eastriverlee/LLM.swift)
