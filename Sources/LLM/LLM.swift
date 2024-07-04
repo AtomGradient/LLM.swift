@@ -373,6 +373,7 @@ open class LLM: ObservableObject {
     }
     
     public func getEmbeddings(for text: String) -> [Float]? {
+        
         let tokens = encode(text)
         var batch = llama_batch_init(Int32(tokens.count), 0, 1)
         
@@ -380,12 +381,11 @@ open class LLM: ObservableObject {
             batch.add(token, Int32(i), [0], i == tokens.count - 1)
         }
         
-        var params = llama_context_default_params()
         params.embeddings = true
         params.pooling_type = LLAMA_POOLING_TYPE_NONE
-        
-        let context = Context(model, params)
-        
+        if context == nil {
+            context = .init(model, params)
+        }
         context.decode(batch)
         llama_synchronize(context.pointer)
         
