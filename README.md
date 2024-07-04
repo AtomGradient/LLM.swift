@@ -3,6 +3,7 @@ We added `getEmbeddings` to LLM package:
 
 ```swift
 public func getEmbeddings(for text: String) -> [Float]? {
+    
     let tokens = encode(text)
     var batch = llama_batch_init(Int32(tokens.count), 0, 1)
     
@@ -10,12 +11,11 @@ public func getEmbeddings(for text: String) -> [Float]? {
         batch.add(token, Int32(i), [0], i == tokens.count - 1)
     }
     
-    var params = llama_context_default_params()
     params.embeddings = true
     params.pooling_type = LLAMA_POOLING_TYPE_NONE
-    
-    let context = Context(model, params)
-    
+    if context == nil {
+        context = .init(model, params)
+    }
     context.decode(batch)
     llama_synchronize(context.pointer)
     
@@ -29,6 +29,7 @@ public func getEmbeddings(for text: String) -> [Float]? {
     
     llama_batch_free(batch)
     return embeddings
+}
 }
 ```
 
