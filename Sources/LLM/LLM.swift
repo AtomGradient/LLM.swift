@@ -40,7 +40,7 @@ open class LLM: ObservableObject {
     public var historyLimit: Int
     public var path: [CChar]
     
-    @Published public private(set) var output = ""    
+    @Published public private(set) var output = ""
     @MainActor public func setOutput(to newOutput: consuming String) {
         output = newOutput
     }
@@ -120,7 +120,7 @@ open class LLM: ObservableObject {
             historyLimit: historyLimit,
             maxTokenCount: maxTokenCount
         )
-    } 
+    }
     
     public convenience init(
         from huggingFaceModel: HuggingFaceModel,
@@ -357,7 +357,7 @@ open class LLM: ObservableObject {
             return output
         }
     }
-
+    
     private var multibyteCharacter: [CUnsignedChar] = []
     private func decode(_ token: Token) -> String {
         return model.decode(token, with: &multibyteCharacter)
@@ -370,6 +370,35 @@ open class LLM: ObservableObject {
     @inlinable
     public func encode(_ text: borrowing String) -> [Token] {
         model.encode(text)
+    }
+    
+    public func getEmbeddings(for text: String) -> [Float]? {
+        let tokens = encode(text)
+        var batch = llama_batch_init(Int32(tokens.count), 0, 1)
+        
+        for (i, token) in tokens.enumerated() {
+            batch.add(token, Int32(i), [0], i == tokens.count - 1)
+        }
+        
+        var params = llama_context_default_params()
+        params.embeddings = true
+        params.pooling_type = LLAMA_POOLING_TYPE_NONE
+        
+        let context = Context(model, params)
+        
+        context.decode(batch)
+        llama_synchronize(context.pointer)
+        
+        guard let embeddingsPointer = llama_get_embeddings(context.pointer) else {
+            llama_batch_free(batch)
+            return nil
+        }
+        
+        let embeddingSize = llama_n_embd(model)
+        let embeddings = Array(UnsafeBufferPointer(start: embeddingsPointer, count: Int(embeddingSize)))
+        
+        llama_batch_free(batch)
+        return embeddings
     }
 }
 
@@ -410,7 +439,7 @@ extension Model {
         multibyteCharacter.removeAll(keepingCapacity: true)
         return decoded
     }
-
+    
     public func encode(_ text: borrowing String) -> [Token] {
         let addBOS = true
         let count = Int32(text.cString(using: .utf8)!.count)
@@ -420,6 +449,7 @@ extension Model {
         let tokens = (0..<Int(tokenCount)).map { cTokens[$0] }
         return tokens
     }
+    
 }
 
 private class Context {
@@ -431,7 +461,10 @@ private class Context {
         llama_free(pointer)
     }
     func decode(_ batch: llama_batch) {
-        guard llama_decode(pointer, batch) == 0 else { fatalError("llama_decode failed") }
+        let result = llama_decode(pointer, batch)
+        guard result == 0 else {
+            fatalError("llama_decode failed with error code \(result)")
+        }
     }
 }
 
@@ -630,7 +663,7 @@ public struct HuggingFaceModel {
         let root = "https://huggingface.co"
         return matches.map { match in root + match }
     }
-
+    
     package func getDownloadURL() async throws -> URL? {
         let urlStrings = try await getDownloadURLStrings()
         for urlString in urlStrings {
