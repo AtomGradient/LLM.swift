@@ -92,6 +92,7 @@ open class LLM: ObservableObject {
         self.stopSequence = stopSequence?.utf8CString
         self.stopSequenceLength = (self.stopSequence?.count ?? 1) - 1
         batch = llama_batch_init(Int32(self.maxTokenCount), 0, 1)
+        print("Default Batch size (n_batch): \(params.n_batch)")
     }
     
     deinit {
@@ -372,13 +373,66 @@ open class LLM: ObservableObject {
         model.encode(text)
     }
     
-    public func getEmbeddings(for text: String) -> [Float]? {
-        
+    public func getEmbeddingsWithBatchProcessing(for text: String) -> [Float]? {
         let tokens = encode(text)
-        var batch = llama_batch_init(Int32(tokens.count), 0, 1)
         
-        for (i, token) in tokens.enumerated() {
-            batch.add(token, Int32(i), [0], i == tokens.count - 1)
+        let maxBatchSize: Int = Int(params.n_batch)
+        print("tokens.count: \(tokens.count), maxBatchSize: \(maxBatchSize)")
+        
+        // handle all tokens
+        var allEmbeddings: [Float] = []
+        var currentIndex = 0
+        
+        while currentIndex < tokens.count {
+            let endIndex = min(currentIndex + maxBatchSize, tokens.count)
+            let tokenBatch = Array(tokens[currentIndex..<endIndex])
+            let tokensCount = tokenBatch.count
+            
+            var batch = llama_batch_init(Int32(tokensCount), 0, 1)
+            
+            for (i, token) in tokenBatch.enumerated() {
+                batch.add(token, Int32(i), [0], i == tokensCount - 1)
+            }
+            
+            params.embeddings = true
+            params.pooling_type = LLAMA_POOLING_TYPE_NONE
+            if context == nil {
+                context = .init(model, params)
+            }
+            context.decode(batch)
+            llama_synchronize(context.pointer)
+            
+            guard let embeddingsPointer = llama_get_embeddings(context.pointer) else {
+                llama_batch_free(batch)
+                return nil
+            }
+            
+            let embeddingSize = llama_n_embd(model)
+            let embeddings = Array(UnsafeBufferPointer(start: embeddingsPointer, count: Int(embeddingSize)))
+            
+            allEmbeddings.append(contentsOf: embeddings)
+            
+            llama_batch_free(batch)
+            currentIndex += maxBatchSize
+        }
+        
+        return allEmbeddings
+    }
+    
+    public func getEmbeddingsWithTruncation(for text: String) -> [Float]? {
+        let tokens = encode(text)
+        
+        let maxBatchSize: Int = Int(params.n_batch)
+        print("tokens.count: \(tokens.count), maxBatchSize: \(maxBatchSize)")
+        
+        // handle maxBatchSize tokens
+        let truncatedTokens = Array(tokens.prefix(maxBatchSize))
+        let tokensCount = truncatedTokens.count
+        
+        var batch = llama_batch_init(Int32(tokensCount), 0, 1)
+        
+        for (i, token) in truncatedTokens.enumerated() {
+            batch.add(token, Int32(i), [0], i == tokensCount - 1)
         }
         
         params.embeddings = true
@@ -400,6 +454,7 @@ open class LLM: ObservableObject {
         llama_batch_free(batch)
         return embeddings
     }
+    
 }
 
 extension Model {
