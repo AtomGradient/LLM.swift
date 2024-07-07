@@ -477,15 +477,17 @@ extension Model {
     public func decode(_ token: Token, with multibyteCharacter: inout [CUnsignedChar]) -> String {
         var bufferLength = 16
         var buffer: [CChar] = .init(repeating: 0, count: bufferLength)
-        let actualLength = Int(llama_token_to_piece(self, token, &buffer, Int32(bufferLength), false))
-        guard 0 != actualLength else { return "" }
+        let actualLength = Int(llama_token_to_piece(self, token, &buffer, Int32(bufferLength), 0, false))
+        guard actualLength != 0 else { return "" }
+        
         if actualLength < 0 {
-            bufferLength = -actualLength
+            bufferLength = Int(-actualLength)
             buffer = .init(repeating: 0, count: bufferLength)
-            llama_token_to_piece(self, token, &buffer, Int32(bufferLength), false)
+            _ = llama_token_to_piece(self, token, &buffer, Int32(bufferLength), 0, false)
         } else {
             buffer.removeLast(bufferLength - actualLength)
         }
+        
         if multibyteCharacter.isEmpty, let decoded = String(cString: buffer + [0], encoding: .utf8) {
             return decoded
         }
@@ -494,6 +496,7 @@ extension Model {
         multibyteCharacter.removeAll(keepingCapacity: true)
         return decoded
     }
+    
     
     public func encode(_ text: borrowing String) -> [Token] {
         let addBOS = true
@@ -654,6 +657,18 @@ public struct Template {
         stopSequence: "</s>",
         systemPrompt: nil
     )
+    
+    public static func phi3(systemPrompt: String? = nil) -> Template {
+        return Template(
+            prefix: "",
+            system: ("", ""),
+            user: ("<|user|>\n", "\n<|end|>\n"),
+            bot: ("<|assistant|>\n", ""),
+            stopSequence: "<|end|>",
+            systemPrompt: systemPrompt,
+            shouldDropLast: false
+        )
+    }
 }
 
 public enum Quantization: String {
