@@ -654,6 +654,18 @@ public struct Template {
         stopSequence: "</s>",
         systemPrompt: nil
     )
+
+    public static func phi3(_ systemPrompt: String? = nil) -> Template {
+        return Template(
+            prefix: "",
+            system: ("", ""),
+            user: ("<|user|>\n", "\n<|end|>\n"),
+            bot: ("<|assistant|>\n", ""),
+            stopSequence: "<|end|>",
+            systemPrompt: systemPrompt,
+            shouldDropLast: false
+        )
+    }
 }
 
 public enum Quantization: String {
