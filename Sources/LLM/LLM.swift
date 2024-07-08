@@ -688,6 +688,7 @@ public enum Quantization: String {
     case Q3_K_L
     case IQ4_XS
     case IQ4_NL
+    case q4
     case Q4_0
     case Q4_1
     case Q4_K_S
