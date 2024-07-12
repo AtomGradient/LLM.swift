@@ -9,7 +9,7 @@ public typealias Chat = (role: Role, content: String)
     static public let shared = InferenceActor()
 }
 
-open class LLM: ObservableObject {
+open class LLMllama: ObservableObject {
     public var model: Model
     public var history: [Chat]
     public var preprocess: (_ input: String, _ history: [Chat]) -> String = { input, _ in return input }

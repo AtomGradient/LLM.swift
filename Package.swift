@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "LLM",
+    name: "LLMllama",
     platforms: [
         .macOS(.v12),
         .iOS(.v14),
@@ -14,8 +14,8 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "LLM",
-            targets: ["LLM"]),
+            name: "LLMllama",
+            targets: ["LLMllama"]),
     ],
     dependencies: [
         .package(url: "https://github.com/ggerganov/llama.cpp/", branch: "master"),
@@ -23,15 +23,15 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "LLM",
+            name: "LLMllama",
             dependencies: [
                 .product(name: "llama", package: "llama.cpp")
             ]),
         .testTarget(
-            name: "LLMTests",
+            name: "LLMllamaTests",
             dependencies: [
                 .product(name: "PowerAssert", package: "swift-power-assert"),
-                "LLM"
+                "LLMllama"
             ]),
     ]
 )
