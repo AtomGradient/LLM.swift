@@ -297,19 +297,22 @@ open class LLMllama: ObservableObject {
         return true
     }
     
-    private func getResponse(from input: borrowing String) -> AsyncStream<String> {
-        .init { output in Task {
-            defer { context = nil }
-            guard prepare(from: input, to: output) else { return output.finish() }
-            var response: [String] = []
-            while currentCount < maxTokenCount {
-                let token = await predictNextToken()
-                if !process(token, to: output) { return output.finish() }
-                currentCount += 1
+    private func getResponse(from input: String) -> AsyncStream<String> {
+        let inputCopy = input  // 将borrowed参数复制到一个新的变量中
+        return AsyncStream { output in 
+            Task {
+                defer { context = nil }
+                guard prepare(from: inputCopy, to: output) else { return output.finish() }
+                var response: [String] = []
+                while currentCount < maxTokenCount {
+                    let token = await predictNextToken()
+                    if !process(token, to: output) { return output.finish() }
+                    currentCount += 1
+                }
+                await finishResponse(from: &response, to: output)
+                return output.finish()
             }
-            await finishResponse(from: &response, to: output)
-            return output.finish()
-        } }
+        }
     }
     
     private var input: String = ""
