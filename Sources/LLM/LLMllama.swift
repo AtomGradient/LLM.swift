@@ -368,7 +368,7 @@ open class LLMllama: ObservableObject {
         model.encode(text)
     }
 
-        public func getEmbeddingsWithBatchProcessing(for text: String) -> [Float]? {
+    public func getEmbeddingsWithBatchProcessing(for text: String) -> [Float]? {
         let tokens = encode(text)
         
         let maxBatchSize: Int = Int(params.n_batch)

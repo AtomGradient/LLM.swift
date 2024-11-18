@@ -2,51 +2,105 @@
 We added `getEmbeddings` to LLM package:
 
 ```swift
-public func getEmbeddings(for text: String) -> [Float]? {
-    
-    let tokens = encode(text)
-    var batch = llama_batch_init(Int32(tokens.count), 0, 1)
-    
-    for (i, token) in tokens.enumerated() {
-        batch.add(token, Int32(i), [0], i == tokens.count - 1)
+public func getEmbeddingsWithBatchProcessing(for text: String) -> [Float]? {
+        let tokens = encode(text)
+        
+        let maxBatchSize: Int = Int(params.n_batch)
+        print("tokens.count: \(tokens.count), maxBatchSize: \(maxBatchSize)")
+        
+        // handle all tokens
+        var allEmbeddings: [Float] = []
+        var currentIndex = 0
+        
+        while currentIndex < tokens.count {
+            let endIndex = min(currentIndex + maxBatchSize, tokens.count)
+            let tokenBatch = Array(tokens[currentIndex..<endIndex])
+            let tokensCount = tokenBatch.count
+            
+            var batch = llama_batch_init(Int32(tokensCount), 0, 1)
+            
+            for (i, token) in tokenBatch.enumerated() {
+                batch.add(token, Int32(i), [0], i == tokensCount - 1)
+            }
+            
+            params.embeddings = true
+            params.pooling_type = LLAMA_POOLING_TYPE_NONE
+            if context == nil {
+                context = .init(model, params)
+            }
+            context.decode(batch)
+            llama_synchronize(context.pointer)
+            
+            guard let embeddingsPointer = llama_get_embeddings(context.pointer) else {
+                llama_batch_free(batch)
+                return nil
+            }
+            
+            let embeddingSize = llama_n_embd(model)
+            let embeddings = Array(UnsafeBufferPointer(start: embeddingsPointer, count: Int(embeddingSize)))
+            
+            allEmbeddings.append(contentsOf: embeddings)
+            
+            llama_batch_free(batch)
+            currentIndex += maxBatchSize
+        }
+        
+        return allEmbeddings
     }
     
-    params.embeddings = true
-    params.pooling_type = LLAMA_POOLING_TYPE_NONE
-    if context == nil {
-        context = .init(model, params)
-    }
-    context.decode(batch)
-    llama_synchronize(context.pointer)
-    
-    guard let embeddingsPointer = llama_get_embeddings(context.pointer) else {
+    public func getEmbeddingsWithTruncation(for text: String) -> [Float]? {
+        let tokens = encode(text)
+        
+        let maxBatchSize: Int = Int(params.n_batch)
+        print("tokens.count: \(tokens.count), maxBatchSize: \(maxBatchSize)")
+        
+        // handle maxBatchSize tokens
+        let truncatedTokens = Array(tokens.prefix(maxBatchSize))
+        let tokensCount = truncatedTokens.count
+        
+        var batch = llama_batch_init(Int32(tokensCount), 0, 1)
+        
+        for (i, token) in truncatedTokens.enumerated() {
+            batch.add(token, Int32(i), [0], i == tokensCount - 1)
+        }
+        
+        params.embeddings = true
+        params.pooling_type = LLAMA_POOLING_TYPE_NONE
+        if context == nil {
+            context = .init(model, params)
+        }
+        context.decode(batch)
+        llama_synchronize(context.pointer)
+        
+        guard let embeddingsPointer = llama_get_embeddings(context.pointer) else {
+            llama_batch_free(batch)
+            return nil
+        }
+        
+        let embeddingSize = llama_n_embd(model)
+        let embeddings = Array(UnsafeBufferPointer(start: embeddingsPointer, count: Int(embeddingSize)))
+        
         llama_batch_free(batch)
-        return nil
+        return embeddings
     }
-    
-    let embeddingSize = llama_n_embd(model)
-    let embeddings = Array(UnsafeBufferPointer(start: embeddingsPointer, count: Int(embeddingSize)))
-    
-    llama_batch_free(batch)
-    return embeddings
-}
-}
+
 ```
 
 you can use this func to invoke it:
 ```swift
-func getEmbeddings(for input: String, completion: @escaping ([Float]?, TimeInterval) -> Void) {
-    let start = DispatchTime.now()
-    guard let embeddings = bot.getEmbeddings(for: input) else {
-        completion(nil, 0)
-        return
+    func getEmbeddings(for input: String, completion: @escaping ([Float]?, TimeInterval) -> Void) {
+        serialQueue.async {
+            let start = DispatchTime.now()
+            guard let embeddings = self.bot.getEmbeddingsWithTruncation(for: input) else {
+                completion(nil, 0)
+                return
+            }
+            let end = DispatchTime.now()
+            let nanoTime = end.uptimeNanoseconds - start.uptimeNanoseconds
+            let timeInterval = Double(nanoTime) / 1_000_000_000
+            completion(embeddings, timeInterval)
+        }
     }
-    let end = DispatchTime.now()
-    let nanoTime = end.uptimeNanoseconds - start.uptimeNanoseconds
-    let timeInterval = Double(nanoTime) / 1_000_000_000
-    
-    completion(embeddings, timeInterval)
-}
 ```
 
 SPM support:
