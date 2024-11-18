@@ -9,7 +9,7 @@ public typealias Chat = (role: Role, content: String)
     static public let shared = InferenceActor()
 }
 
-open class LLMllama: ObservableObject {
+open class LLM: ObservableObject {
     public var model: Model
     public var history: [Chat]
     public var preprocess: (_ input: String, _ history: [Chat]) -> String = { input, _ in return input }
@@ -34,13 +34,14 @@ open class LLMllama: ObservableObject {
         }
     }
     
+    public var seed: UInt32
     public var topK: Int32
     public var topP: Float
     public var temp: Float
     public var historyLimit: Int
     public var path: [CChar]
     
-    @Published public private(set) var output = ""
+    @Published public private(set) var output = ""    
     @MainActor public func setOutput(to newOutput: consuming String) {
         output = newOutput
     }
@@ -74,13 +75,13 @@ open class LLMllama: ObservableObject {
 #endif
         let model = llama_load_model_from_file(self.path, modelParams)!
         params = llama_context_default_params()
-        let processorCount = UInt32(ProcessInfo().processorCount)
+        let processorCount = Int32(ProcessInfo().processorCount)
         self.maxTokenCount = Int(min(maxTokenCount, llama_n_ctx_train(model)))
-        params.seed = seed
         params.n_ctx = UInt32(self.maxTokenCount)
         params.n_batch = params.n_ctx
         params.n_threads = processorCount
         params.n_threads_batch = processorCount
+        self.seed = seed
         self.topK = topK
         self.topP = topP
         self.temp = temp
@@ -92,7 +93,6 @@ open class LLMllama: ObservableObject {
         self.stopSequence = stopSequence?.utf8CString
         self.stopSequenceLength = (self.stopSequence?.count ?? 1) - 1
         batch = llama_batch_init(Int32(self.maxTokenCount), 0, 1)
-        print("Default Batch size (n_batch): \(params.n_batch)")
     }
     
     deinit {
@@ -121,7 +121,7 @@ open class LLMllama: ObservableObject {
             historyLimit: historyLimit,
             maxTokenCount: maxTokenCount
         )
-    }
+    } 
     
     public convenience init(
         from huggingFaceModel: HuggingFaceModel,
@@ -187,22 +187,17 @@ open class LLMllama: ObservableObject {
     @InferenceActor
     private func predictNextToken() async -> Token {
         guard shouldContinuePredicting else { return model.endToken }
-        let logits = llama_get_logits_ith(context.pointer, batch.n_tokens - 1)!
-        var candidates = (0..<totalTokenCount).map { token in
-            llama_token_data(id: Int32(token), logit: logits[token], p: 0.0)
-        }
-        var token: llama_token!
-        candidates.withUnsafeMutableBufferPointer { pointer in
-            var candidates = llama_token_data_array(
-                data: pointer.baseAddress,
-                size: totalTokenCount,
-                sorted: false
-            )
-            llama_sample_top_k(context.pointer, &candidates, topK, 1)
-            llama_sample_top_p(context.pointer, &candidates, topP, 1)
-            llama_sample_temp(context.pointer, &candidates, temp)
-            token = llama_sample_token(context.pointer, &candidates)
-        }
+        let samplerParams = llama_sampler_chain_default_params()
+        let sampler = llama_sampler_chain_init(samplerParams)
+        
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(topK))
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1))
+        llama_sampler_chain_add(sampler, llama_sampler_init_temp(temp))
+        llama_sampler_chain_add(sampler, llama_sampler_init_dist(seed))
+
+        let i = batch.n_tokens - 1
+        let token = llama_sampler_sample(sampler, context.pointer, i)
+        
         batch.clear()
         batch.add(token, currentCount, [0], true)
         context.decode(batch)
@@ -298,21 +293,18 @@ open class LLMllama: ObservableObject {
     }
     
     private func getResponse(from input: String) -> AsyncStream<String> {
-        let inputCopy = input  // 将borrowed参数复制到一个新的变量中
-        return AsyncStream { output in 
-            Task {
-                defer { context = nil }
-                guard prepare(from: inputCopy, to: output) else { return output.finish() }
-                var response: [String] = []
-                while currentCount < maxTokenCount {
-                    let token = await predictNextToken()
-                    if !process(token, to: output) { return output.finish() }
-                    currentCount += 1
-                }
-                await finishResponse(from: &response, to: output)
-                return output.finish()
+        .init { output in Task {
+            defer { context = nil }
+            guard prepare(from: input, to: output) else { return output.finish() }
+            var response: [String] = []
+            while currentCount < maxTokenCount {
+                let token = await predictNextToken()
+                if !process(token, to: output) { return output.finish() }
+                currentCount += 1
             }
-        }
+            await finishResponse(from: &response, to: output)
+            return output.finish()
+        } }
     }
     
     private var input: String = ""
@@ -361,7 +353,7 @@ open class LLMllama: ObservableObject {
             return output
         }
     }
-    
+
     private var multibyteCharacter: [CUnsignedChar] = []
     private func decode(_ token: Token) -> String {
         return model.decode(token, with: &multibyteCharacter)
@@ -375,8 +367,8 @@ open class LLMllama: ObservableObject {
     public func encode(_ text: borrowing String) -> [Token] {
         model.encode(text)
     }
-    
-    public func getEmbeddingsWithBatchProcessing(for text: String) -> [Float]? {
+
+        public func getEmbeddingsWithBatchProcessing(for text: String) -> [Float]? {
         let tokens = encode(text)
         
         let maxBatchSize: Int = Int(params.n_batch)
@@ -457,7 +449,6 @@ open class LLMllama: ObservableObject {
         llama_batch_free(batch)
         return embeddings
     }
-    
 }
 
 extension Model {
@@ -466,10 +457,10 @@ extension Model {
     
     public func shouldAddBOS() -> Bool {
         let addBOS = llama_add_bos_token(self);
-        guard addBOS != -1 else {
+        guard !addBOS else {
             return llama_vocab_type(self) == LLAMA_VOCAB_TYPE_SPM
         }
-        return addBOS != 0
+        return addBOS
     }
     
     public func decodeOnly(_ token: Token) -> String {
@@ -481,16 +472,14 @@ extension Model {
         var bufferLength = 16
         var buffer: [CChar] = .init(repeating: 0, count: bufferLength)
         let actualLength = Int(llama_token_to_piece(self, token, &buffer, Int32(bufferLength), 0, false))
-        guard actualLength != 0 else { return "" }
-        
+        guard 0 != actualLength else { return "" }
         if actualLength < 0 {
-            bufferLength = Int(-actualLength)
+            bufferLength = -actualLength
             buffer = .init(repeating: 0, count: bufferLength)
-            _ = llama_token_to_piece(self, token, &buffer, Int32(bufferLength), 0, false)
+            llama_token_to_piece(self, token, &buffer, Int32(bufferLength), 0, false)
         } else {
             buffer.removeLast(bufferLength - actualLength)
         }
-        
         if multibyteCharacter.isEmpty, let decoded = String(cString: buffer + [0], encoding: .utf8) {
             return decoded
         }
@@ -499,7 +488,7 @@ extension Model {
         multibyteCharacter.removeAll(keepingCapacity: true)
         return decoded
     }
-    
+
     public func encode(_ text: borrowing String) -> [Token] {
         let addBOS = true
         let count = Int32(text.cString(using: .utf8)!.count)
@@ -509,7 +498,6 @@ extension Model {
         let tokens = (0..<Int(tokenCount)).map { cTokens[$0] }
         return tokens
     }
-    
 }
 
 private class Context {
@@ -521,10 +509,7 @@ private class Context {
         llama_free(pointer)
     }
     func decode(_ batch: llama_batch) {
-        let result = llama_decode(pointer, batch)
-        guard result == 0 else {
-            fatalError("llama_decode failed with error code \(result)")
-        }
+        guard llama_decode(pointer, batch) == 0 else { fatalError("llama_decode failed") }
     }
 }
 
@@ -659,18 +644,6 @@ public struct Template {
         stopSequence: "</s>",
         systemPrompt: nil
     )
-
-    public static func phi3(_ systemPrompt: String? = nil) -> Template {
-        return Template(
-            prefix: "",
-            system: ("", ""),
-            user: ("<|user|>\n", "\n<|end|>\n"),
-            bot: ("<|assistant|>\n", ""),
-            stopSequence: "<|end|>",
-            systemPrompt: systemPrompt,
-            shouldDropLast: false
-        )
-    }
 }
 
 public enum Quantization: String {
@@ -691,7 +664,6 @@ public enum Quantization: String {
     case Q3_K_L
     case IQ4_XS
     case IQ4_NL
-    case q4
     case Q4_0
     case Q4_1
     case Q4_K_S
@@ -736,7 +708,7 @@ public struct HuggingFaceModel {
         let root = "https://huggingface.co"
         return matches.map { match in root + match }
     }
-    
+
     package func getDownloadURL() async throws -> URL? {
         let urlStrings = try await getDownloadURLStrings()
         for urlString in urlStrings {
