@@ -637,6 +637,18 @@ public struct Template {
             shouldDropLast: true
         )
     }
+
+    public static func phi3(_ systemPrompt: String? = nil) -> Template {
+        return Template(
+            prefix: "",
+            system: ("", ""),
+            user: ("<|user|>\n", "\n<|end|>\n"),
+            bot: ("<|assistant|>\n", ""),
+            stopSequence: "<|end|>",
+            systemPrompt: systemPrompt,
+            shouldDropLast: false
+        )
+    }
     
     public static let mistral = Template(
         user: ("[INST] ", " [/INST]"),
@@ -664,6 +676,7 @@ public enum Quantization: String {
     case Q3_K_L
     case IQ4_XS
     case IQ4_NL
+    case q4
     case Q4_0
     case Q4_1
     case Q4_K_S
